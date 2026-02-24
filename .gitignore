@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.build/
+.swiftpm/
+.swiftpm-cache/
+Package.resolved
+
+# Editor
+.vscode/
+
+# Runtime caches/logs
+*.log
