@@ -1,11 +1,7 @@
 import AVFoundation
 
 enum PlayerItemFactory {
-    static func makeItem(for recording: Recording) -> AVPlayerItem {
-        AVPlayerItem(asset: makeAsset(for: recording))
-    }
-
-    static func makeAsset(for recording: Recording) -> AVAsset {
+    static func makeAsset(for recording: Recording) async -> AVAsset {
         guard recording.segmentURLs.count > 1 else {
             return AVURLAsset(url: recording.segmentURLs[0])
         }
@@ -24,17 +20,19 @@ enum PlayerItemFactory {
 
         for (index, url) in recording.segmentURLs.enumerated() {
             let asset = AVURLAsset(url: url)
-            let duration = asset.duration
+            let duration = (try? await asset.load(.duration)) ?? .zero
             let timeRange = CMTimeRange(start: .zero, duration: duration)
 
-            if let videoTrack = asset.tracks(withMediaType: .video).first {
+            if let videoTrack = try? await asset.loadTracks(withMediaType: .video).first {
                 try? compositionVideoTrack?.insertTimeRange(timeRange, of: videoTrack, at: cursor)
                 if index == 0 {
-                    compositionVideoTrack?.preferredTransform = videoTrack.preferredTransform
+                    if let transform = try? await videoTrack.load(.preferredTransform) {
+                        compositionVideoTrack?.preferredTransform = transform
+                    }
                 }
             }
 
-            if let audioTrack = asset.tracks(withMediaType: .audio).first {
+            if let audioTrack = try? await asset.loadTracks(withMediaType: .audio).first {
                 try? compositionAudioTrack?.insertTimeRange(timeRange, of: audioTrack, at: cursor)
             }
 

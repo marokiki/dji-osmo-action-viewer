@@ -1,11 +1,17 @@
 import Foundation
 import AVKit
+@preconcurrency import AVFoundation
 import AppKit
 import Combine
 import UniformTypeIdentifiers
 
 @MainActor
 final class ViewerModel: ObservableObject {
+    private final class ExporterBox: @unchecked Sendable {
+        let exporter: AVAssetExportSession
+        init(_ exporter: AVAssetExportSession) { self.exporter = exporter }
+    }
+
     private let supportedVideoExtensions: Set<String> = ["mp4", "mov", "m4v"]
     @Published var folderURL: URL?
     @Published var recordings: [Recording] = []
@@ -225,22 +231,27 @@ final class ViewerModel: ObservableObject {
         exportStartSecondsText = ""
         exportEndSecondsText = ""
 
-        let item = PlayerItemFactory.makeItem(for: recording)
+        Task { [weak self] in
+            guard let self else { return }
+            let asset = await PlayerItemFactory.makeAsset(for: recording)
+            let item = AVPlayerItem(asset: asset)
+            guard self.selectedRecordingID == recording.id else { return }
 
-        currentItemCancellable = item.publisher(for: \.status)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] status in
-                guard let self else { return }
-                if status == .failed {
-                    self.errorMessage = "Cannot play: \(recordingDisplayName(recording)) (\(item.error?.localizedDescription ?? "Unknown error"))"
-                } else if status == .readyToPlay {
-                    self.errorMessage = nil
+            self.currentItemCancellable = item.publisher(for: \.status)
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] status in
+                    guard let self else { return }
+                    if status == .failed {
+                        self.errorMessage = "Cannot play: \(recordingDisplayName(recording)) (\(item.error?.localizedDescription ?? "Unknown error"))"
+                    } else if status == .readyToPlay {
+                        self.errorMessage = nil
+                    }
                 }
-            }
 
-        player.replaceCurrentItem(with: item)
-        startPlaybackTimeObserver()
-        player.play()
+            self.player.replaceCurrentItem(with: item)
+            self.startPlaybackTimeObserver()
+            self.player.play()
+        }
     }
 
     func seek(seconds: Double) {
@@ -398,15 +409,6 @@ final class ViewerModel: ObservableObject {
             return
         }
 
-        let asset = PlayerItemFactory.makeAsset(for: recording)
-        let durationSeconds = CMTimeGetSeconds(asset.duration)
-        if durationSeconds.isFinite {
-            guard end <= durationSeconds else {
-                errorMessage = "End seconds exceeds duration. Max: \(String(format: "%.1f", durationSeconds)) sec"
-                return
-            }
-        }
-
         let panel = NSSavePanel()
         panel.title = "Export Clipped Video"
         panel.nameFieldStringValue = defaultExportFileName(for: recording, start: start, end: end)
@@ -415,42 +417,11 @@ final class ViewerModel: ObservableObject {
 
         guard panel.runModal() == .OK, let outputURL = panel.url else { return }
 
-        if FileManager.default.fileExists(atPath: outputURL.path) {
-            try? FileManager.default.removeItem(at: outputURL)
-        }
-
-        guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
-            errorMessage = "Failed to initialize exporter."
-            return
-        }
-
-        let outputFileType: AVFileType = exporter.supportedFileTypes.contains(.mp4) ? .mp4 : .mov
-        exporter.outputURL = outputURL
-        exporter.outputFileType = outputFileType
-        exporter.shouldOptimizeForNetworkUse = true
-        exporter.timeRange = CMTimeRange(
-            start: CMTime(seconds: start, preferredTimescale: 600),
-            duration: CMTime(seconds: end - start, preferredTimescale: 600)
-        )
-
         isExporting = true
         errorMessage = nil
-        exporter.exportAsynchronously { [weak self] in
-            Task { @MainActor in
-                guard let self else { return }
-                self.isExporting = false
-
-                switch exporter.status {
-                case .completed:
-                    self.errorMessage = nil
-                case .failed:
-                    self.errorMessage = "Export failed: \(exporter.error?.localizedDescription ?? "Unknown error")"
-                case .cancelled:
-                    self.errorMessage = "Export was cancelled."
-                default:
-                    self.errorMessage = "Export did not complete."
-                }
-            }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.performExport(recording: recording, start: start, end: end, outputURL: outputURL)
         }
     }
 
@@ -530,5 +501,54 @@ final class ViewerModel: ObservableObject {
         let detected = VideoMetadataDetector.detect(from: recording.segmentURLs[0])
         detectedMetadataByRecordingKey[recording.key] = detected
         return detected
+    }
+
+    private func performExport(recording: Recording, start: Double, end: Double, outputURL: URL) async {
+        let asset = await PlayerItemFactory.makeAsset(for: recording)
+        let duration = (try? await asset.load(.duration)) ?? .invalid
+        let durationSeconds = CMTimeGetSeconds(duration)
+        if durationSeconds.isFinite, end > durationSeconds {
+            isExporting = false
+            errorMessage = "End seconds exceeds duration. Max: \(String(format: "%.1f", durationSeconds)) sec"
+            return
+        }
+
+        if FileManager.default.fileExists(atPath: outputURL.path) {
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+
+        guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
+            isExporting = false
+            errorMessage = "Failed to initialize exporter."
+            return
+        }
+
+        let outputFileType: AVFileType = exporter.supportedFileTypes.contains(.mp4) ? .mp4 : .mov
+        exporter.outputURL = outputURL
+        exporter.outputFileType = outputFileType
+        exporter.shouldOptimizeForNetworkUse = true
+        exporter.timeRange = CMTimeRange(
+            start: CMTime(seconds: start, preferredTimescale: 600),
+            duration: CMTime(seconds: end - start, preferredTimescale: 600)
+        )
+
+        let exporterBox = ExporterBox(exporter)
+        exporter.exportAsynchronously { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isExporting = false
+
+                switch exporterBox.exporter.status {
+                case .completed:
+                    self.errorMessage = nil
+                case .failed:
+                    self.errorMessage = "Export failed: \(exporterBox.exporter.error?.localizedDescription ?? "Unknown error")"
+                case .cancelled:
+                    self.errorMessage = "Export was cancelled."
+                default:
+                    self.errorMessage = "Export did not complete."
+                }
+            }
+        }
     }
 }
