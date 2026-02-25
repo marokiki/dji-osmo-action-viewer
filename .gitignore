@@ -12,3 +12,6 @@ Package.resolved
 
 # Runtime caches/logs
 *.log
+
+# Distribution artifacts
+dist/

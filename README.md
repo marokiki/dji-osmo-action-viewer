@@ -64,6 +64,15 @@ swift build -c release
 .build/release/OsmoActionViewer
 ```
 
+## Build a DMG for distribution
+```bash
+swift build -c release
+./scripts/make_dmg.sh v0.1.0
+```
+
+Output:
+- `dist/OsmoActionViewer-v0.1.0.dmg`
+
 ## Typical workflow
 1. Launch the app.
 2. Click `Open Recording Folder`.
