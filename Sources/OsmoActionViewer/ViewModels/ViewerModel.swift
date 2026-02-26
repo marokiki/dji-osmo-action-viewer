@@ -503,6 +503,18 @@ final class ViewerModel: ObservableObject {
         return detected
     }
 
+    private func makeCreationDateMetadataItem(_ date: Date) -> AVMetadataItem? {
+        let formatter = ISO8601DateFormatter()
+        let creationDate = formatter.string(from: date)
+
+        let item = AVMutableMetadataItem()
+        item.keySpace = .common
+        item.key = AVMetadataKey.commonKeyCreationDate as NSString
+        item.value = creationDate as NSString
+        item.dataType = kCMMetadataBaseDataType_UTF8 as String
+        return item.copy() as? AVMetadataItem
+    }
+
     private func performExport(recording: Recording, start: Double, end: Double, outputURL: URL) async {
         let asset = await PlayerItemFactory.makeAsset(for: recording)
         let duration = (try? await asset.load(.duration)) ?? .invalid
@@ -527,6 +539,10 @@ final class ViewerModel: ObservableObject {
         exporter.outputURL = outputURL
         exporter.outputFileType = outputFileType
         exporter.shouldOptimizeForNetworkUse = true
+        if let capturedAt = effectiveCapturedAt(for: recording)?.addingTimeInterval(start),
+           let metadataItem = makeCreationDateMetadataItem(capturedAt) {
+            exporter.metadata = [metadataItem]
+        }
         exporter.timeRange = CMTimeRange(
             start: CMTime(seconds: start, preferredTimescale: 600),
             duration: CMTime(seconds: end - start, preferredTimescale: 600)

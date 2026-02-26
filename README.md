@@ -19,6 +19,7 @@ It scans videos recursively from a selected root folder and organizes them by tr
 - Clip export (partial range):
   - set start/end seconds
   - export selected range
+  - keeps `Captured At` metadata based on original capture time + export start offset
 - Metadata editing per recording:
   - title
   - location text
