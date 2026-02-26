@@ -24,6 +24,7 @@ final class ViewerModel: ObservableObject {
     @Published var editingLocationText: String = ""
     @Published var editingGoogleMapsURL: String = ""
     @Published var markerInputSeconds: String = ""
+    @Published var markerClipDurationSecondsText: String = "10"
     @Published var currentPlaybackSeconds: Double = 0
     @Published var exportStartSecondsText: String = ""
     @Published var exportEndSecondsText: String = ""
@@ -381,6 +382,45 @@ final class ViewerModel: ObservableObject {
         markerInputSeconds = ""
     }
 
+    func exportHighlightsFromMarkers() {
+        guard let recording = selectedRecording else { return }
+        guard !isExporting else { return }
+
+        let markers = self.markers(for: recording)
+        guard !markers.isEmpty else {
+            errorMessage = "No markers found for this video."
+            return
+        }
+
+        guard let clipDuration = Double(markerClipDurationSecondsText.trimmingCharacters(in: .whitespacesAndNewlines)),
+              clipDuration > 0
+        else {
+            errorMessage = "Highlight clip duration must be a number greater than 0."
+            return
+        }
+
+        let panel = NSSavePanel()
+        panel.title = "Export Marker Highlights"
+        panel.nameFieldStringValue = defaultHighlightsExportFileName(for: recording)
+        panel.allowedContentTypes = [.mpeg4Movie, .quickTimeMovie]
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let outputURL = panel.url else { return }
+
+        isExporting = true
+        errorMessage = nil
+
+        Task { [weak self] in
+            guard let self else { return }
+            await self.performHighlightsExport(
+                recording: recording,
+                markers: markers,
+                clipDuration: clipDuration,
+                outputURL: outputURL
+            )
+        }
+    }
+
     func seekToMarker(_ seconds: Double) {
         guard player.currentItem != nil else { return }
         let clamped = max(0, seconds)
@@ -487,6 +527,13 @@ final class ViewerModel: ObservableObject {
         return "\(safeTitle)_\(Int(start))-\(Int(end)).mp4"
     }
 
+    private func defaultHighlightsExportFileName(for recording: Recording) -> String {
+        let safeTitle = recordingDisplayName(recording)
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+        return "\(safeTitle)_highlights.mp4"
+    }
+
     private func startPlaybackTimeObserver() {
         if let timeObserverToken {
             player.removeTimeObserver(timeObserverToken)
@@ -575,6 +622,170 @@ final class ViewerModel: ObservableObject {
             start: CMTime(seconds: start, preferredTimescale: 600),
             duration: CMTime(seconds: end - start, preferredTimescale: 600)
         )
+
+        let exporterBox = ExporterBox(exporter)
+        exporter.exportAsynchronously { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isExporting = false
+
+                switch exporterBox.exporter.status {
+                case .completed:
+                    self.errorMessage = nil
+                case .failed:
+                    self.errorMessage = "Export failed: \(exporterBox.exporter.error?.localizedDescription ?? "Unknown error")"
+                case .cancelled:
+                    self.errorMessage = "Export was cancelled."
+                default:
+                    self.errorMessage = "Export did not complete."
+                }
+            }
+        }
+    }
+
+    private func performHighlightsExport(
+        recording: Recording,
+        markers: [Double],
+        clipDuration: Double,
+        outputURL: URL
+    ) async {
+        let asset = await PlayerItemFactory.makeAsset(for: recording)
+        let duration = (try? await asset.load(.duration)) ?? .invalid
+        let sourceDurationSeconds = CMTimeGetSeconds(duration)
+        guard sourceDurationSeconds.isFinite, sourceDurationSeconds > 0 else {
+            isExporting = false
+            errorMessage = "Source video duration is invalid."
+            return
+        }
+
+        guard let sourceVideoTrack = try? await asset.loadTracks(withMediaType: .video).first else {
+            isExporting = false
+            errorMessage = "No video track found in source asset."
+            return
+        }
+
+        let sourceAudioTrack = try? await asset.loadTracks(withMediaType: .audio).first
+        let sourceTransform = (try? await sourceVideoTrack.load(.preferredTransform)) ?? .identity
+        let sourceNaturalSize = (try? await sourceVideoTrack.load(.naturalSize)) ?? CGSize(width: 1920, height: 1080)
+        let transformedSize = sourceNaturalSize.applying(sourceTransform)
+        let renderSize = CGSize(
+            width: max(1, abs(transformedSize.width)),
+            height: max(1, abs(transformedSize.height))
+        )
+
+        let composition = AVMutableComposition()
+        guard let outputVideoTrack = composition.addMutableTrack(
+            withMediaType: .video,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else {
+            isExporting = false
+            errorMessage = "Failed to create output video track."
+            return
+        }
+        let outputAudioTrack = composition.addMutableTrack(
+            withMediaType: .audio,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        )
+
+        var cursor = CMTime.zero
+        var segments: [(start: CMTime, duration: CMTime)] = []
+        for marker in markers.sorted() {
+            let startSec = max(0, marker)
+            if startSec >= sourceDurationSeconds { continue }
+            let actualDurationSec = min(clipDuration, sourceDurationSeconds - startSec)
+            if actualDurationSec <= 0 { continue }
+
+            let sourceRange = CMTimeRange(
+                start: CMTime(seconds: startSec, preferredTimescale: 600),
+                duration: CMTime(seconds: actualDurationSec, preferredTimescale: 600)
+            )
+
+            try? outputVideoTrack.insertTimeRange(sourceRange, of: sourceVideoTrack, at: cursor)
+            if let sourceAudioTrack {
+                try? outputAudioTrack?.insertTimeRange(sourceRange, of: sourceAudioTrack, at: cursor)
+            }
+
+            segments.append((start: cursor, duration: sourceRange.duration))
+            cursor = CMTimeAdd(cursor, sourceRange.duration)
+        }
+
+        if segments.isEmpty {
+            isExporting = false
+            errorMessage = "No valid marker ranges to export."
+            return
+        }
+
+        outputVideoTrack.preferredTransform = sourceTransform
+
+        let instruction = AVMutableVideoCompositionInstruction()
+        instruction.timeRange = CMTimeRange(start: .zero, duration: cursor)
+
+        let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: outputVideoTrack)
+        layerInstruction.setTransform(sourceTransform, at: .zero)
+        instruction.layerInstructions = [layerInstruction]
+
+        let videoComposition = AVMutableVideoComposition()
+        videoComposition.instructions = [instruction]
+        videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
+        videoComposition.renderSize = renderSize
+
+        let title = recordingDisplayName(recording)
+        let parentLayer = CALayer()
+        parentLayer.frame = CGRect(origin: .zero, size: renderSize)
+        let videoLayer = CALayer()
+        videoLayer.frame = parentLayer.frame
+        parentLayer.addSublayer(videoLayer)
+
+        for segment in segments {
+            let textLayer = CATextLayer()
+            textLayer.string = title
+            textLayer.alignmentMode = .right
+            textLayer.foregroundColor = NSColor.white.cgColor
+            textLayer.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
+            textLayer.cornerRadius = 6
+            textLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+            textLayer.fontSize = max(16, renderSize.width * 0.03)
+            textLayer.masksToBounds = true
+            textLayer.frame = CGRect(
+                x: renderSize.width * 0.45,
+                y: renderSize.height - 56,
+                width: renderSize.width * 0.52,
+                height: 40
+            )
+            textLayer.opacity = 0
+
+            let show = CABasicAnimation(keyPath: "opacity")
+            show.fromValue = 1
+            show.toValue = 1
+            show.beginTime = AVCoreAnimationBeginTimeAtZero + CMTimeGetSeconds(segment.start)
+            show.duration = CMTimeGetSeconds(segment.duration)
+            show.fillMode = .backwards
+            show.isRemovedOnCompletion = true
+            textLayer.add(show, forKey: "showText")
+
+            parentLayer.addSublayer(textLayer)
+        }
+
+        videoComposition.animationTool = AVVideoCompositionCoreAnimationTool(
+            postProcessingAsVideoLayer: videoLayer,
+            in: parentLayer
+        )
+
+        if FileManager.default.fileExists(atPath: outputURL.path) {
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+
+        guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
+            isExporting = false
+            errorMessage = "Failed to initialize exporter."
+            return
+        }
+
+        let outputFileType: AVFileType = exporter.supportedFileTypes.contains(.mp4) ? .mp4 : .mov
+        exporter.outputURL = outputURL
+        exporter.outputFileType = outputFileType
+        exporter.shouldOptimizeForNetworkUse = true
+        exporter.videoComposition = videoComposition
 
         let exporterBox = ExporterBox(exporter)
         exporter.exportAsynchronously { [weak self] in
