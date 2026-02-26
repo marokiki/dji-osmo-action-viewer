@@ -435,6 +435,24 @@ final class ViewerModel: ObservableObject {
         }
     }
 
+    func deleteSelectedRecording() {
+        guard let recording = selectedRecording else { return }
+        guard let folderURL else { return }
+
+        player.pause()
+        for url in recording.segmentURLs {
+            do {
+                var trashedURL: NSURL?
+                try FileManager.default.trashItem(at: url, resultingItemURL: &trashedURL)
+            } catch {
+                errorMessage = "Failed to delete video: \(error.localizedDescription)"
+                return
+            }
+        }
+
+        loadRecordings(from: folderURL, preferredSectionName: recording.sectionName)
+    }
+
     private func addMarker(seconds: Double) {
         guard let recording = selectedRecording else { return }
         let rounded = (max(0, seconds) * 10).rounded() / 10

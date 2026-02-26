@@ -21,6 +21,7 @@ It scans videos recursively from a selected root folder and organizes them by tr
   - set start/end seconds
   - export selected range
   - keeps `Captured At` metadata based on original capture time + export start offset
+- Delete selected video(s) to Trash
 - Metadata editing per recording:
   - title
   - location text
