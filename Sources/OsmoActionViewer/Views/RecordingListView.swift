@@ -53,15 +53,10 @@ struct RecordingListView: View {
     private var sectionControlsView: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Button(model.isBulkSelectMode ? "Done" : "Select Multiple") {
-                    model.toggleBulkSelectMode()
+                Button("Delete Selected", role: .destructive) {
+                    showBulkDeleteConfirmation = true
                 }
-                if model.isBulkSelectMode {
-                    Button("Delete Selected", role: .destructive) {
-                        showBulkDeleteConfirmation = true
-                    }
-                    .disabled(model.checkedRecordingIDs.isEmpty)
-                }
+                .disabled(model.checkedRecordingIDs.isEmpty)
             }
 
             Picker(
@@ -82,17 +77,7 @@ struct RecordingListView: View {
     private var recordingsListView: some View {
         List {
             ForEach(model.selectedSection?.recordings ?? []) { recording in
-                Button {
-                    clearTextInputFocusIfNeeded()
-                    if model.isBulkSelectMode {
-                        model.toggleChecked(recordingID: recording.id)
-                    } else {
-                        model.play(recordingID: recording.id)
-                    }
-                } label: {
-                    rowContent(for: recording)
-                }
-                .buttonStyle(.plain)
+                rowContent(for: recording)
                 .listRowBackground(
                     model.selectedRecordingID == recording.id ? Color.accentColor.opacity(0.2) : Color.clear
                 )
@@ -102,10 +87,14 @@ struct RecordingListView: View {
 
     private func rowContent(for recording: Recording) -> some View {
         HStack {
-            if model.isBulkSelectMode {
+            Button {
+                model.toggleChecked(recordingID: recording.id)
+            } label: {
                 Image(systemName: model.isChecked(recordingID: recording.id) ? "checkmark.square.fill" : "square")
                     .foregroundStyle(model.isChecked(recordingID: recording.id) ? Color.accentColor : .secondary)
             }
+            .buttonStyle(.plain)
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.recordingDisplayName(recording))
                     .font(.system(.body, design: .monospaced))
@@ -120,5 +109,9 @@ struct RecordingListView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 3)
         .contentShape(Rectangle())
+        .onTapGesture {
+            clearTextInputFocusIfNeeded()
+            model.play(recordingID: recording.id)
+        }
     }
 }

@@ -18,13 +18,6 @@ final class ViewerModel: ObservableObject {
     @Published var recordingSections: [RecordingSection] = []
     @Published var selectedSectionName: String?
     @Published var selectedRecordingID: String?
-    @Published var isBulkSelectMode: Bool = false {
-        didSet {
-            if !isBulkSelectMode {
-                checkedRecordingIDs = []
-            }
-        }
-    }
     @Published var checkedRecordingIDs: Set<String> = []
     @Published var player = AVPlayer()
     @Published var errorMessage: String?
@@ -215,14 +208,9 @@ final class ViewerModel: ObservableObject {
 
     func selectSection(name: String) {
         selectedSectionName = name
-        checkedRecordingIDs = []
         if let folderURL {
             loadRecordings(from: folderURL, preferredSectionName: name)
         }
-    }
-
-    func toggleBulkSelectMode() {
-        isBulkSelectMode.toggle()
     }
 
     func isChecked(recordingID: String) -> Bool {
@@ -540,24 +528,6 @@ final class ViewerModel: ObservableObject {
             guard let self else { return }
             await self.performExport(recording: recording, start: start, end: end, outputURL: outputURL)
         }
-    }
-
-    func deleteSelectedRecording() {
-        guard let recording = selectedRecording else { return }
-        guard let folderURL else { return }
-
-        player.pause()
-        for url in recording.segmentURLs {
-            do {
-                var trashedURL: NSURL?
-                try FileManager.default.trashItem(at: url, resultingItemURL: &trashedURL)
-            } catch {
-                errorMessage = "Failed to delete video: \(error.localizedDescription)"
-                return
-            }
-        }
-
-        loadRecordings(from: folderURL, preferredSectionName: recording.sectionName)
     }
 
     func deleteCheckedRecordings() {

@@ -2,7 +2,6 @@ import SwiftUI
 
 struct RecordingDetailView: View {
     @ObservedObject var model: ViewerModel
-    @State private var showDeleteConfirmation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -15,7 +14,6 @@ struct RecordingDetailView: View {
                     }
 
                 playbackControls
-                deleteControls
                 exportControls
                 markerControls(recording: recording)
                 metadataEditors(recording: recording)
@@ -24,14 +22,6 @@ struct RecordingDetailView: View {
             }
         }
         .padding()
-        .alert("Delete selected video?", isPresented: $showDeleteConfirmation) {
-            Button("Delete", role: .destructive) {
-                model.deleteSelectedRecording()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This moves the selected video file(s) to Trash.")
-        }
     }
 
     private var playbackControls: some View {
@@ -68,14 +58,6 @@ struct RecordingDetailView: View {
                     model.exportSelectedRange()
                 }
                 .disabled(model.isExporting)
-            }
-        }
-    }
-
-    private var deleteControls: some View {
-        HStack {
-            Button("Delete Video", role: .destructive) {
-                showDeleteConfirmation = true
             }
         }
     }
@@ -128,12 +110,10 @@ struct RecordingDetailView: View {
                             model.exportHighlightsFromMarkers()
                         }
                         .disabled(model.isExporting)
-                        if model.isBulkSelectMode {
-                            Button(model.isExporting ? "Exporting..." : "Export Highlights (Selected Videos)") {
-                                model.exportHighlightsFromCheckedRecordings()
-                            }
-                            .disabled(model.isExporting || model.checkedRecordingIDs.isEmpty)
+                        Button(model.isExporting ? "Exporting..." : "Export Highlights (Selected Videos)") {
+                            model.exportHighlightsFromCheckedRecordings()
                         }
+                        .disabled(model.isExporting || model.checkedRecordingIDs.isEmpty)
                     }
                 }
             }
