@@ -62,7 +62,9 @@ struct RecordingListView: View {
                     model.clearCheckedInCurrentSection()
                 }
                 .disabled(model.checkedRecordingIDs.isEmpty)
+            }
 
+            HStack(spacing: 8) {
                 Button("Delete Selected", role: .destructive) {
                     showBulkDeleteConfirmation = true
                 }
