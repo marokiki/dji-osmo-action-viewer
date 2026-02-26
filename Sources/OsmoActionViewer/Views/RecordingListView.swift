@@ -53,10 +53,28 @@ struct RecordingListView: View {
     private var sectionControlsView: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
+                Button("Select All") {
+                    model.selectAllInCurrentSection()
+                }
+                .disabled((model.selectedSection?.recordings.isEmpty ?? true))
+
+                Button("Clear") {
+                    model.clearCheckedInCurrentSection()
+                }
+                .disabled(model.checkedRecordingIDs.isEmpty)
+
                 Button("Delete Selected", role: .destructive) {
                     showBulkDeleteConfirmation = true
                 }
                 .disabled(model.checkedRecordingIDs.isEmpty)
+
+                TextField("Clip sec", text: $model.markerClipDurationSecondsText)
+                    .frame(width: 90)
+
+                Button(model.isExporting ? "Exporting..." : "Export Highlights") {
+                    model.exportHighlightsFromCheckedRecordings()
+                }
+                .disabled(model.isExporting || model.checkedRecordingIDs.isEmpty)
             }
 
             Picker(

@@ -104,16 +104,9 @@ struct RecordingDetailView: View {
                     .frame(maxHeight: 120)
 
                     HStack(spacing: 8) {
-                        TextField("Clip Length (sec)", text: $model.markerClipDurationSecondsText)
-                            .frame(width: 130)
-                        Button(model.isExporting ? "Exporting..." : "Export Marker Highlights") {
-                            model.exportHighlightsFromMarkers()
-                        }
-                        .disabled(model.isExporting)
-                        Button(model.isExporting ? "Exporting..." : "Export Highlights (Selected Videos)") {
-                            model.exportHighlightsFromCheckedRecordings()
-                        }
-                        .disabled(model.isExporting || model.checkedRecordingIDs.isEmpty)
+                        Text("Use top-left controls to export highlights from checked videos.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }

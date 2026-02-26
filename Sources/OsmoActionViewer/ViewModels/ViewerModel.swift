@@ -225,6 +225,17 @@ final class ViewerModel: ObservableObject {
         }
     }
 
+    func selectAllInCurrentSection() {
+        guard let selectedSection else { return }
+        checkedRecordingIDs.formUnion(selectedSection.recordings.map(\.id))
+    }
+
+    func clearCheckedInCurrentSection() {
+        guard let selectedSection else { return }
+        let ids = Set(selectedSection.recordings.map(\.id))
+        checkedRecordingIDs.subtract(ids)
+    }
+
     private func sectionName(for fileURL: URL, rootFolder: URL) -> String {
         let filePath = fileURL.deletingLastPathComponent().path
         let rootPath = rootFolder.path
