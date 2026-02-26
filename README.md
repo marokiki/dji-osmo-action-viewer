@@ -19,6 +19,7 @@ It scans videos recursively from a selected root folder and organizes them by tr
   - delete marker
   - export marker highlights (configurable clip length, default 10s)
   - render recording title at top-right on each highlight clip
+  - export marker highlights across multiple checked videos
 - Clip export (partial range):
   - set start/end seconds
   - export selected range

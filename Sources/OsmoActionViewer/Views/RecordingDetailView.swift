@@ -128,6 +128,12 @@ struct RecordingDetailView: View {
                             model.exportHighlightsFromMarkers()
                         }
                         .disabled(model.isExporting)
+                        if model.isBulkSelectMode {
+                            Button(model.isExporting ? "Exporting..." : "Export Highlights (Selected Videos)") {
+                                model.exportHighlightsFromCheckedRecordings()
+                            }
+                            .disabled(model.isExporting || model.checkedRecordingIDs.isEmpty)
+                        }
                     }
                 }
             }
