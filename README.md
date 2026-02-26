@@ -6,6 +6,7 @@ It scans videos recursively from a selected root folder and organizes them by tr
 ## Features
 - Recursive scan of videos under the selected folder
 - Section-based browsing by subdirectory (for example: `Iki Trip`, `highlight`)
+  - switching sections refreshes file changes (added/removed videos)
 - Video playback
 - Keyboard shortcuts:
   - `Left Arrow`: seek -10s

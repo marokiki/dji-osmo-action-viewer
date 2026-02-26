@@ -101,7 +101,8 @@ final class ViewerModel: ObservableObject {
         }
     }
 
-    func loadRecordings(from folder: URL) {
+    func loadRecordings(from folder: URL, preferredSectionName: String? = nil) {
+        let previousSelectedRecordingID = selectedRecordingID
         metadataByRecordingKey = metadataStoreService.load(from: folder)
         detectedMetadataByRecordingKey = [:]
 
@@ -175,9 +176,25 @@ final class ViewerModel: ObservableObject {
 
         recordings = builtRecordings
         recordingSections = sections
-        selectedSectionName = sections.first?.name
+        let requestedSection = preferredSectionName ?? selectedSectionName
+        if let requestedSection,
+           sections.contains(where: { $0.name == requestedSection }) {
+            selectedSectionName = requestedSection
+        } else {
+            selectedSectionName = sections.first?.name
+        }
 
-        if let first = sections.first?.recordings.first {
+        guard let currentSection = selectedSection else {
+            clearSelection()
+            player.replaceCurrentItem(with: nil)
+            errorMessage = "No video files were found."
+            return
+        }
+
+        if let previousSelectedRecordingID,
+           currentSection.recordings.contains(where: { $0.id == previousSelectedRecordingID }) {
+            play(recordingID: previousSelectedRecordingID)
+        } else if let first = currentSection.recordings.first {
             play(recordingID: first.id)
         } else {
             clearSelection()
@@ -187,16 +204,9 @@ final class ViewerModel: ObservableObject {
     }
 
     func selectSection(name: String) {
-        guard selectedSectionName != name else { return }
         selectedSectionName = name
-
-        guard let section = recordingSections.first(where: { $0.name == name }) else { return }
-        if let selectedRecordingID,
-           section.recordings.contains(where: { $0.id == selectedRecordingID }) {
-            return
-        }
-        if let first = section.recordings.first {
-            play(recordingID: first.id)
+        if let folderURL {
+            loadRecordings(from: folderURL, preferredSectionName: name)
         }
     }
 
