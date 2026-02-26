@@ -18,6 +18,14 @@ final class ViewerModel: ObservableObject {
     @Published var recordingSections: [RecordingSection] = []
     @Published var selectedSectionName: String?
     @Published var selectedRecordingID: String?
+    @Published var isBulkSelectMode: Bool = false {
+        didSet {
+            if !isBulkSelectMode {
+                checkedRecordingIDs = []
+            }
+        }
+    }
+    @Published var checkedRecordingIDs: Set<String> = []
     @Published var player = AVPlayer()
     @Published var errorMessage: String?
     @Published var editingTitle: String = ""
@@ -177,6 +185,7 @@ final class ViewerModel: ObservableObject {
 
         recordings = builtRecordings
         recordingSections = sections
+        checkedRecordingIDs = checkedRecordingIDs.intersection(Set(builtRecordings.map(\.id)))
         let requestedSection = preferredSectionName ?? selectedSectionName
         if let requestedSection,
            sections.contains(where: { $0.name == requestedSection }) {
@@ -206,8 +215,25 @@ final class ViewerModel: ObservableObject {
 
     func selectSection(name: String) {
         selectedSectionName = name
+        checkedRecordingIDs = []
         if let folderURL {
             loadRecordings(from: folderURL, preferredSectionName: name)
+        }
+    }
+
+    func toggleBulkSelectMode() {
+        isBulkSelectMode.toggle()
+    }
+
+    func isChecked(recordingID: String) -> Bool {
+        checkedRecordingIDs.contains(recordingID)
+    }
+
+    func toggleChecked(recordingID: String) {
+        if checkedRecordingIDs.contains(recordingID) {
+            checkedRecordingIDs.remove(recordingID)
+        } else {
+            checkedRecordingIDs.insert(recordingID)
         }
     }
 
@@ -491,6 +517,31 @@ final class ViewerModel: ObservableObject {
         }
 
         loadRecordings(from: folderURL, preferredSectionName: recording.sectionName)
+    }
+
+    func deleteCheckedRecordings() {
+        guard let folderURL else { return }
+        guard !checkedRecordingIDs.isEmpty else {
+            errorMessage = "No videos selected."
+            return
+        }
+
+        let targets = recordings.filter { checkedRecordingIDs.contains($0.id) }
+        player.pause()
+        for recording in targets {
+            for url in recording.segmentURLs {
+                do {
+                    var trashedURL: NSURL?
+                    try FileManager.default.trashItem(at: url, resultingItemURL: &trashedURL)
+                } catch {
+                    errorMessage = "Failed to delete video: \(error.localizedDescription)"
+                    return
+                }
+            }
+        }
+
+        checkedRecordingIDs = []
+        loadRecordings(from: folderURL, preferredSectionName: selectedSectionName)
     }
 
     private func addMarker(seconds: Double) {

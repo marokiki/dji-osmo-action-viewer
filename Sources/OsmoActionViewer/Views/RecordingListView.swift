@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RecordingListView: View {
     @ObservedObject var model: ViewerModel
+    @State private var showBulkDeleteConfirmation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -9,6 +10,33 @@ struct RecordingListView: View {
                 model.chooseFolder()
             }
 
+            folderInfoView
+
+            if !model.recordingSections.isEmpty {
+                sectionControlsView
+            }
+
+            recordingsListView
+
+            if let error = model.errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .padding()
+        .alert("Delete selected videos?", isPresented: $showBulkDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                model.deleteCheckedRecordings()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Selected video files will be moved to Trash.")
+        }
+    }
+
+    private var folderInfoView: some View {
+        Group {
             if let folderURL = model.folderURL {
                 Text(folderURL.path)
                     .font(.caption)
@@ -19,57 +47,78 @@ struct RecordingListView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
 
-            if !model.recordingSections.isEmpty {
-                Picker(
-                    "Section",
-                    selection: Binding(
-                        get: { model.selectedSectionName ?? "" },
-                        set: { model.selectSection(name: $0) }
-                    )
-                ) {
-                    ForEach(model.recordingSections) { section in
-                        Text(section.name).tag(section.name)
-                    }
+    private var sectionControlsView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Button(model.isBulkSelectMode ? "Done" : "Select Multiple") {
+                    model.toggleBulkSelectMode()
                 }
-                .pickerStyle(.menu)
+                if model.isBulkSelectMode {
+                    Button("Delete Selected", role: .destructive) {
+                        showBulkDeleteConfirmation = true
+                    }
+                    .disabled(model.checkedRecordingIDs.isEmpty)
+                }
             }
 
-            List {
-                ForEach(model.selectedSection?.recordings ?? []) { recording in
-                    Button {
-                        clearTextInputFocusIfNeeded()
+            Picker(
+                "Section",
+                selection: Binding(
+                    get: { model.selectedSectionName ?? "" },
+                    set: { model.selectSection(name: $0) }
+                )
+            ) {
+                ForEach(model.recordingSections) { section in
+                    Text(section.name).tag(section.name)
+                }
+            }
+            .pickerStyle(.menu)
+        }
+    }
+
+    private var recordingsListView: some View {
+        List {
+            ForEach(model.selectedSection?.recordings ?? []) { recording in
+                Button {
+                    clearTextInputFocusIfNeeded()
+                    if model.isBulkSelectMode {
+                        model.toggleChecked(recordingID: recording.id)
+                    } else {
                         model.play(recordingID: recording.id)
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(model.recordingDisplayName(recording))
-                                    .font(.system(.body, design: .monospaced))
-                                    .lineLimit(1)
-                                Text(model.capturedAtText(for: recording))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            Spacer(minLength: 0)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 3)
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
-                    .listRowBackground(
-                        model.selectedRecordingID == recording.id ? Color.accentColor.opacity(0.2) : Color.clear
-                    )
+                } label: {
+                    rowContent(for: recording)
                 }
-            }
-
-            if let error = model.errorMessage {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                .buttonStyle(.plain)
+                .listRowBackground(
+                    model.selectedRecordingID == recording.id ? Color.accentColor.opacity(0.2) : Color.clear
+                )
             }
         }
-        .padding()
+    }
+
+    private func rowContent(for recording: Recording) -> some View {
+        HStack {
+            if model.isBulkSelectMode {
+                Image(systemName: model.isChecked(recordingID: recording.id) ? "checkmark.square.fill" : "square")
+                    .foregroundStyle(model.isChecked(recordingID: recording.id) ? Color.accentColor : .secondary)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(model.recordingDisplayName(recording))
+                    .font(.system(.body, design: .monospaced))
+                    .lineLimit(1)
+                Text(model.capturedAtText(for: recording))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 3)
+        .contentShape(Rectangle())
     }
 }
