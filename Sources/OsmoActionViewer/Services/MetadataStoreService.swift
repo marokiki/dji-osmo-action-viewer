@@ -23,6 +23,13 @@ final class MetadataStoreService {
 
     // MARK: - Public API
 
+    func migrateLegacyAppSupportEntriesIfNeeded() {
+        for folderPath in legacyFolderPaths() {
+            let folderURL = URL(fileURLWithPath: folderPath, isDirectory: true)
+            migrateLegacyEntriesIfNeeded(to: folderURL)
+        }
+    }
+
     func load(from folderURL: URL) -> [String: RecordingMetadata] {
         guard let db = openFolderDatabase(folderURL, createIfMissing: false) else {
             return tryMigrateAndLoad(folderURL: folderURL)
@@ -89,6 +96,33 @@ final class MetadataStoreService {
         }
     }
 
+    private func migrateLegacyEntriesIfNeeded(to folderURL: URL) {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: folderURL.path, isDirectory: &isDirectory),
+              isDirectory.boolValue,
+              let db = openFolderDatabase(folderURL, createIfMissing: true) else {
+            return
+        }
+        defer { sqlite3_close(db) }
+
+        let current = loadAll(db: db)
+        var merged = current
+
+        let legacyJSON = loadLegacyJSON(from: folderURL)
+        for (key, value) in legacyJSON where merged[key] == nil {
+            merged[key] = value
+        }
+
+        let fromAppSupport = loadFromLegacyAppSupport(folderPath: folderURL.path)
+        for (key, value) in fromAppSupport where merged[key] == nil {
+            merged[key] = value
+        }
+
+        writeMetaFlag(db: db, key: "migrated_from_appsupport", value: "1")
+        guard merged.count != current.count else { return }
+        try? writeAll(db: db, entries: merged)
+    }
+
     private func loadLegacyJSON(from folderURL: URL) -> [String: RecordingMetadata] {
         let fileURL = folderURL.appendingPathComponent(".osmo-action-viewer-metadata.json")
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return [:] }
@@ -143,6 +177,42 @@ final class MetadataStoreService {
                 locationText: locationText,
                 googleMapsURL: googleMapsURL
             )
+        }
+        return result
+    }
+
+    private func legacyFolderPaths() -> [String] {
+        guard let url = legacyAppSupportDatabaseURL(),
+              FileManager.default.fileExists(atPath: url.path) else {
+            return []
+        }
+
+        var legacyDB: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &legacyDB, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+              let legacyDB else {
+            if let legacyDB { sqlite3_close(legacyDB) }
+            return []
+        }
+        defer { sqlite3_close(legacyDB) }
+
+        let sql = """
+        SELECT DISTINCT folder_path
+        FROM recording_metadata
+        WHERE folder_path IS NOT NULL AND folder_path != '';
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(legacyDB, sql, -1, &stmt, nil) == SQLITE_OK else {
+            if let stmt { sqlite3_finalize(stmt) }
+            return []
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var result: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let folderPath = Self.textColumn(stmt, index: 0)
+            if !folderPath.isEmpty {
+                result.append(folderPath)
+            }
         }
         return result
     }

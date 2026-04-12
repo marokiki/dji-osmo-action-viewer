@@ -54,6 +54,10 @@ final class ViewerModel: ObservableObject {
         return formatter
     }()
 
+    init() {
+        metadataStoreService.migrateLegacyAppSupportEntriesIfNeeded()
+    }
+
     var selectedRecording: Recording? {
         guard let selectedRecordingID else { return nil }
         return recordings.first(where: { $0.id == selectedRecordingID })
